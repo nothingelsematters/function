@@ -4,6 +4,9 @@
 #include <functional>
 #include <vector>
 
+void rvalue(int&& a) {
+    std::cout << a;
+}
 
 void func(int a) {
     std::cout << "test function " << a << "\n";
@@ -141,6 +144,11 @@ void test_bind_with_params() {
     function<void (int)> binder = std::bind(func, _1);
     std::cout << "bind test with parametres: ";
     binder(5);
+}
+
+void test_rvalue() {
+    function<void (int)> rvl(rvalue);
+    rvl(5);
 }
 
 

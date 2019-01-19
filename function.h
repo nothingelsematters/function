@@ -73,7 +73,7 @@ private:
 
         virtual ~callable_holder_base() {}
 
-        virtual R call(Args... args) const = 0;
+        virtual R call(Args... args) = 0;
 
         virtual std::unique_ptr<callable_holder_base> clone() const = 0;
 
@@ -88,8 +88,8 @@ private:
     public:
         function_holder(F func) : callable_holder_base(), func(std::move(func)) {}
 
-        R call(Args... args) const {
-            return func(args...);
+        R call(Args... args) {
+            return func(std::forward<Args>(args)...);
         }
 
         callable_t clone() const {
@@ -105,8 +105,8 @@ private:
     public:
         pointer_holder(F func) : callable_holder_base(), func(new F(std::move(func))) {}
 
-        R call(Args... args) const {
-            return (*func)(args...);
+        R call(Args... args) {
+            return (*func)(std::forward<Args>(args)...);
         }
 
         callable_t clone() const {
@@ -124,7 +124,7 @@ private:
 
         class_holder(member func) : callable_holder_base(), func(std::move(func)) {}
 
-        R call(Class object, FunArgs... fun_args) const {
+        R call(Class object, FunArgs... fun_args) {
             return (object.*func)(fun_args...);
         }
 
