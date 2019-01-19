@@ -147,8 +147,10 @@ void test_bind_with_params() {
 }
 
 void test_rvalue() {
+    int a = 5;
     function<void (int)> rvl(rvalue);
     rvl(5);
+    rvl(std::move(5));
 }
 
 
@@ -167,4 +169,5 @@ int main() {
     test_swap();
     test_bind();
     test_bind_with_params();
+    test_rvalue();
 }
