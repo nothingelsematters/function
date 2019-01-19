@@ -120,7 +120,7 @@ private:
     template <typename F, typename Class, typename... FunArgs>
     class class_holder : public callable_holder_base {
     public:
-        typedef F Class::* member;
+        using member = F Class::*;
 
         class_holder(member func) : callable_holder_base(), func(func) {}
 
