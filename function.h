@@ -17,7 +17,7 @@ public:
 
     function(std::nullptr_t) noexcept : callable(nullptr) {}
 
-    function(const function& other) : callable(other.callable->clone()) {}
+    function(const function& other) : callable(std::move(other.callable->clone())) {}
 
     function(function&& other) noexcept {
         swap(other);
@@ -86,7 +86,7 @@ private:
     template <typename F>
     class function_holder : public callable_holder_base {
     public:
-        function_holder(F func) : callable_holder_base(), func(func) {}
+        function_holder(F func) : callable_holder_base(), func(std::move(func)) {}
 
         R call(Args... args) const {
             return func(args...);
@@ -103,7 +103,7 @@ private:
     template <typename F>
     class pointer_holder : public callable_holder_base {
     public:
-        pointer_holder(F func) : callable_holder_base(), func(new F(func)) {}
+        pointer_holder(F func) : callable_holder_base(), func(new F(std::move(func))) {}
 
         R call(Args... args) const {
             return (*func)(args...);
@@ -122,7 +122,7 @@ private:
     public:
         using member = F Class::*;
 
-        class_holder(member func) : callable_holder_base(), func(func) {}
+        class_holder(member func) : callable_holder_base(), func(std::move(func)) {}
 
         R call(Class object, FunArgs... fun_args) const {
             return (object.*func)(fun_args...);
