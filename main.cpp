@@ -5,7 +5,7 @@
 #include <vector>
 
 void rvalue(int&& a) {
-    std::cout << a;
+    std::cout << a << '\n';
 }
 
 void func(int a) {
@@ -27,6 +27,31 @@ class FuncStructAnother {
 public:
     void operator()() const {
         std::cout << "test class operator()\n";
+    }
+};
+
+class Enormous {
+public:
+    int a = 10;
+    int b = 10;
+    int c = 10;
+    int d = 10;
+    int e = 10;
+    int f = 10;
+    int g = 10;
+    int h = 10;
+    int y = 10;
+    int a1 = 10;
+    int b1 = 10;
+    int c1 = 10;
+    int d1 = 10;
+    int e1 = 10;
+    int f1 = 10;
+    int g1 = 10;
+    int h1 = 10;
+    int y1 = 10;
+    void operator()() {
+        std::cout << "test big(" << sizeof(*this) << ")\n";
     }
 };
 
@@ -73,8 +98,8 @@ void test_lambda() {
 
 void test_member() {
     function<void (FuncStruct)> f4(&FuncStruct::operator());
-    FuncStruct fuck;
-    f4(fuck);
+    FuncStruct memb;
+    f4(memb);
 }
 
 void test_sum() {
@@ -91,12 +116,12 @@ void test_bool() {
     f4(funct);
 
     std::cout << "test bool: empty " << static_cast<bool>(f) << '\n'
-              << "test bool: function " << static_cast<bool>(f4) << '\n';
+           << "test bool: function " << static_cast<bool>(f4) << '\n';
 }
 
 void test_templates() {
     function<void (std::string)> f(with_templates<std::string>);
-    f(std::string("test with templates"));
+    f(std::string("test with templates\n"));
 }
 
 template<typename R, typename... Args>
@@ -150,10 +175,29 @@ void test_rvalue() {
     int a = 5;
     function<void (int)> rvl(rvalue);
     rvl(5);
-    rvl(std::move(5));
+    rvl(std::move(a));
 }
 
+void test_enormous() {
+    Enormous big;
+    function<void ()> f(big);
+    f();
+    FuncStructAnother small;
+    function<void ()> f2(small);
+    f2();
+    f.swap(f2);
+    f();
+    f2();
+}
 
+void test_exception() {
+    function<void (int)> f;
+    try {
+        f(5);
+    } catch (bad_function_call& e) {
+        std::cout << "exception test: " << e.what() << '\n';
+    }
+}
 
 int main() {
     test_empty();
@@ -166,8 +210,11 @@ int main() {
     test_bool();
     test_move();
     test_copy();
+    test_templates();
     test_swap();
+    test_enormous();
     test_bind();
     test_bind_with_params();
     test_rvalue();
+    test_exception();
 }

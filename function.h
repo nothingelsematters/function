@@ -1,49 +1,68 @@
 #ifndef FUNCTION_H
 #define FUNCTION_H
 
-#include <cstddef>
 #include <memory>
-#include <variant>
 
-#include <iostream>
+#include "badfunctionexception.h"
 
-template <class>
+
+template <typename>
 class function;
 
 template<typename R, typename... Args>
 class function<R (Args...)> {
 public:
-    function() noexcept : callable() {}
+    function(std::nullptr_t) noexcept : small_object(false), big_pointer(nullptr) {}
 
-    function(std::nullptr_t) noexcept : callable(nullptr) {}
+    function() noexcept : function(nullptr) {}
 
-    function(const function& other) : callable(std::move(other.callable->clone())) {}
+    function(const function& other) {
+        if (other.small_object) {
+            small_object = true;
+            std::copy(std::begin(other.buffer), std::end(other.buffer), buffer);
+        } else {
+            small_object = false;
+            big_pointer = other.big_pointer->clone();
+        }
+    }
 
-    function(function&& other) noexcept {
+    function(function&& other) noexcept : function() {
         swap(other);
-        other.callable = nullptr;
     }
 
     template <typename F>
     function(F f) {
-        std::cout << "size " << sizeof(f) << "        ";
-        if (sizeof(f) > MAX_SIZE) {
-            std::cout << " using BIG OBJECT ";
-            callable = std::make_unique<pointer_holder<F>>(f);
+        if constexpr (sizeof(f) > MAX_SIZE) {
+            small_object = false;
+            new (buffer) std::unique_ptr<wrapper_function<F>>(
+                        std::make_unique<wrapper_function<F>>(std::move(f)));
         } else {
-            std::cout << " using SMALL OBJECT ";
-            callable = std::make_unique<function_holder<F>>(f);
+            small_object = true;
+            new (buffer) wrapper_function<F>(std::move(f));
         }
     }
 
     template <typename F, typename Class>
-    function(F Class::* member) : callable(std::make_unique<class_holder<F, Class>>(member)) {}
+    function(F Class::* member) {
+        if constexpr (sizeof(member) > MAX_SIZE) {
+            small_object = false;
+            new (buffer) std::unique_ptr<wrapper_member<F, Class>>(
+                        std::make_unique<wrapper_member<F, Class>>(std::move(member)));
+        } else {
+            small_object = true;
+            new (buffer) wrapper_member<F, Class>(member);
+        }
+    }
 
-    ~function() {}
+    ~function() {
+        if (!small_object) {
+            big_pointer.~unique_ptr();
+        }
+    }
 
     function& operator=(const function& other) {
-        function<R (Args...)> new_func(other);
-        swap(new_func);
+        function tmp(other);
+        swap(tmp);
         return *this;
     }
 
@@ -53,91 +72,83 @@ public:
     }
 
     void swap(function& other) noexcept {
-        std::swap(callable, other.callable);
+        std::swap(small_object, other.small_object);
+        std::swap(buffer, other.buffer);
     }
 
     explicit operator bool() const noexcept {
-        return static_cast<bool>(callable);
+        return small_object || static_cast<bool>(big_pointer);
     }
 
     R operator()(Args... args) const {
-        return callable->call(args...);
+        if (!static_cast<bool>(*this)) {
+            throw bad_function_call();
+        }
+        return small_object ? ((wrapper*)(buffer))->call(std::forward<Args>(args)...) :
+                                       big_pointer->call(std::forward<Args>(args)...);
     }
 
-
 private:
-
-    class callable_holder_base {
+    class wrapper {
     public:
-        callable_holder_base() {}
+        wrapper() {}
 
-        virtual ~callable_holder_base() {}
+        virtual ~wrapper() {}
 
-        virtual R call(Args... args) = 0;
+        virtual R call(Args&&...) = 0;
 
-        virtual std::unique_ptr<callable_holder_base> clone() const = 0;
-
-        callable_holder_base(const callable_holder_base&) = delete;
-        callable_holder_base& operator=(const callable_holder_base&) = delete;
+        virtual std::unique_ptr<wrapper> clone() const = 0;
     };
 
-    using callable_t = std::unique_ptr<callable_holder_base>;
-
-    template <typename F>
-    class function_holder : public callable_holder_base {
+    template <typename T>
+    class wrapper_function : public wrapper {
     public:
-        function_holder(F func) : callable_holder_base(), func(std::move(func)) {}
+        wrapper_function(const T& callable) : wrapper(), callable(callable) {}
 
-        R call(Args... args) {
-            return func(std::forward<Args>(args)...);
+        wrapper_function(T&& callable) : wrapper(), callable(std::move(callable)) {}
+
+        ~wrapper_function() {}
+
+        R call(Args&&... args) {
+            return callable(std::forward<Args>(args)...);
         }
 
-        callable_t clone() const {
-            return std::make_unique<function_holder>(func);
+        std::unique_ptr<wrapper> clone() const {
+            return std::make_unique<wrapper_function<T>>(callable);
         }
 
     private:
-        F func;
-    };
-
-    template <typename F>
-    class pointer_holder : public callable_holder_base {
-    public:
-        pointer_holder(F func) : callable_holder_base(), func(new F(std::move(func))) {}
-
-        R call(Args... args) {
-            return (*func)(std::forward<Args>(args)...);
-        }
-
-        callable_t clone() const {
-            return std::make_unique<pointer_holder>(*func);
-        }
-
-    private:
-        std::unique_ptr<F> func;
+        T callable;
     };
 
     template <typename F, typename Class, typename... FunArgs>
-    class class_holder : public callable_holder_base {
+    class wrapper_member : public wrapper {
     public:
         using member = F Class::*;
 
-        class_holder(member func) : callable_holder_base(), func(std::move(func)) {}
+        wrapper_member(member callable) : wrapper(), callable(std::move(callable)) {}
 
-        R call(Class object, FunArgs... fun_args) {
-            return (object.*func)(fun_args...);
+        ~wrapper_member() {}
+
+        R call(Class&& object, FunArgs&&... fun_args) {
+            return (object.*callable)(std::forward<FunArgs>(fun_args)...);
         }
 
-        callable_t clone() const {
-            return std::make_unique<class_holder>(func);
+        std::unique_ptr<wrapper> clone() const {
+            return std::make_unique<wrapper_member>(callable);
         }
 
     private:
-        member func;
+        member callable;
     };
 
-    callable_t callable;
-    static const int MAX_SIZE = 10;
+    static constexpr int MAX_SIZE = 64;
+    bool small_object;
+
+    union {
+        std::unique_ptr<wrapper> big_pointer;
+        char buffer[MAX_SIZE];
+    };
 };
 
 #endif // FUNCTION_H
