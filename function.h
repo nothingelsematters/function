@@ -18,16 +18,22 @@ public:
 
     function(const function& other) {
         if (other.small_object) {
-            small_object = true;
-            std::copy(std::begin(other.buffer), std::end(other.buffer), buffer);
+            reinterpret_cast<const wrapper*>(other.buffer)->clone_small(buffer);
         } else {
-            small_object = false;
-            big_pointer = other.big_pointer->clone();
+            new (buffer) std::unique_ptr((other.big_pointer)->clone());
         }
+        small_object = other.small_object;
     }
 
-    function(function&& other) noexcept : function() {
-        swap(other);
+    function(function&& other) noexcept {
+        if (other.small_object) {
+            reinterpret_cast<wrapper*>(other.buffer)->move_by_pointer(buffer);
+            new (other.buffer) std::unique_ptr<wrapper>(nullptr);
+        } else {
+            new (buffer) std::unique_ptr<wrapper>(std::move(other.big_pointer));
+        }
+        small_object = other.small_object;
+        other.small_object = false;
     }
 
     template <typename F>
@@ -55,11 +61,7 @@ public:
     }
 
     ~function() {
-        if (!small_object) {
-            big_pointer.~unique_ptr();
-        } else {
-            ((wrapper*)(buffer))->~wrapper();
-        }
+        destruction();
     }
 
     function& operator=(const function& other) {
@@ -69,13 +71,26 @@ public:
     }
 
     function& operator=(function&& other) noexcept {
-        swap(other);
+        destruction();
+
+        auto tmp_other = reinterpret_cast<wrapper*>(other.buffer);
+        if (other.small_object) {
+            tmp_other->move_by_pointer(buffer);
+            new (other.buffer) std::unique_ptr<wrapper>(nullptr);
+        } else {
+            new (buffer) std::unique_ptr<wrapper>(std::move(other.big_pointer));
+        }
+
+        small_object = other.small_object;
+        other.small_object = false;
+
         return *this;
     }
 
     void swap(function& other) noexcept {
-        std::swap(small_object, other.small_object);
-        std::swap(buffer, other.buffer);
+        function tmp(std::move(other));
+        other = std::move(*this);
+        *this = std::move(tmp);
     }
 
     explicit operator bool() const noexcept {
@@ -91,6 +106,14 @@ public:
     }
 
 private:
+    void destruction() {
+        if (small_object) {
+            ((wrapper*)(buffer))->~wrapper();
+        } else {
+            big_pointer.~unique_ptr();
+        }
+    }
+
     class wrapper {
     public:
         wrapper() {}
@@ -98,6 +121,10 @@ private:
         virtual ~wrapper() {}
 
         virtual R call(Args&&...) = 0;
+
+        virtual void move_by_pointer(void* to) = 0;
+
+        virtual void clone_small(void* to) const = 0;
 
         virtual std::unique_ptr<wrapper> clone() const = 0;
     };
@@ -107,9 +134,21 @@ private:
     public:
         wrapper_function(const T& callable) : wrapper(), callable(callable) {}
 
+        wrapper_function(const wrapper& other) {
+            wrapper_function(other.callable);
+        }
+
         wrapper_function(T&& callable) : wrapper(), callable(std::move(callable)) {}
 
         ~wrapper_function() {}
+
+        void move_by_pointer(void* to) {
+            new (to) wrapper_function<T>(std::move(callable));
+        }
+
+        virtual void clone_small(void* to) const {
+            new (to) wrapper_function<T>(callable);
+        }
 
         R call(Args&&... args) {
             return callable(std::forward<Args>(args)...);
@@ -130,7 +169,19 @@ private:
 
         wrapper_member(member callable) : wrapper(), callable(std::move(callable)) {}
 
+        wrapper_member(const wrapper& other) {
+            wrapper_member(other.callable);
+        }
+
         ~wrapper_member() {}
+
+        void move_by_pointer(void* to) {
+            new (to) wrapper_member<F, Class>(std::move(callable));
+        }
+
+        virtual void clone_small(void* to) const {
+            new (to) wrapper_member<F, Class>(callable);
+        }
 
         R call(Class&& object, FunArgs&&... fun_args) {
             return (object.*callable)(std::forward<FunArgs>(fun_args)...);
