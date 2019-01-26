@@ -57,6 +57,8 @@ public:
     ~function() {
         if (!small_object) {
             big_pointer.~unique_ptr();
+        } else {
+            ((wrapper*)(buffer))->~wrapper();
         }
     }
 
