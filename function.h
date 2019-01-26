@@ -32,7 +32,7 @@ public:
 
     template <typename F>
     function(F f) {
-        if constexpr (sizeof(f) > MAX_SIZE) {
+        if constexpr (noexcept(F(std::move(f))) && sizeof(f) > MAX_SIZE) {
             small_object = false;
             new (buffer) std::unique_ptr<wrapper_function<F>>(
                         std::make_unique<wrapper_function<F>>(std::move(f)));
