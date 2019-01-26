@@ -2,6 +2,7 @@
 #define FUNCTION_H
 
 #include <memory>
+#include <type_traits>
 
 #include "badfunctionexception.h"
 
@@ -38,7 +39,7 @@ public:
 
     template <typename F>
     function(F f) {
-        if constexpr (noexcept(F(std::move(f))) && sizeof(f) > MAX_SIZE) {
+        if constexpr (std::is_nothrow_move_constructible<F>::value && sizeof(f) > MAX_SIZE) {
             small_object = false;
             new (buffer) std::unique_ptr<wrapper_function<F>>(
                         std::make_unique<wrapper_function<F>>(std::move(f)));
@@ -50,14 +51,8 @@ public:
 
     template <typename F, typename Class>
     function(F Class::* member) {
-        if constexpr (sizeof(member) > MAX_SIZE) {
-            small_object = false;
-            new (buffer) std::unique_ptr<wrapper_member<F, Class>>(
-                        std::make_unique<wrapper_member<F, Class>>(std::move(member)));
-        } else {
-            small_object = true;
-            new (buffer) wrapper_member<F, Class>(member);
-        }
+        small_object = true;
+        new (buffer) wrapper_member<F, Class>(member);
     }
 
     ~function() {
@@ -65,6 +60,8 @@ public:
     }
 
     function& operator=(const function& other) {
+        destruction();
+
         function tmp(other);
         swap(tmp);
         return *this;
@@ -73,9 +70,8 @@ public:
     function& operator=(function&& other) noexcept {
         destruction();
 
-        auto tmp_other = reinterpret_cast<wrapper*>(other.buffer);
         if (other.small_object) {
-            tmp_other->move_by_pointer(buffer);
+            reinterpret_cast<wrapper*>(other.buffer)->move_by_pointer(buffer);
             new (other.buffer) std::unique_ptr<wrapper>(nullptr);
         } else {
             new (buffer) std::unique_ptr<wrapper>(std::move(other.big_pointer));
@@ -97,18 +93,18 @@ public:
         return small_object || static_cast<bool>(big_pointer);
     }
 
-    R operator()(Args... args) const {
+    R operator()(Args... args) {
         if (!static_cast<bool>(*this)) {
             throw bad_function_call();
         }
-        return small_object ? ((wrapper*)(buffer))->call(std::forward<Args>(args)...) :
-                                       big_pointer->call(std::forward<Args>(args)...);
+        return small_object ? reinterpret_cast<wrapper*>(buffer)->call(std::forward<Args>(args)...) :
+                                                     big_pointer->call(std::forward<Args>(args)...);
     }
 
 private:
     void destruction() {
         if (small_object) {
-            ((wrapper*)(buffer))->~wrapper();
+            reinterpret_cast<wrapper*>(buffer)->~wrapper();
         } else {
             big_pointer.~unique_ptr();
         }
@@ -116,9 +112,9 @@ private:
 
     class wrapper {
     public:
-        wrapper() {}
+        wrapper() = default;
 
-        virtual ~wrapper() {}
+        virtual ~wrapper() = default;
 
         virtual R call(Args&&...) = 0;
 
@@ -134,13 +130,13 @@ private:
     public:
         wrapper_function(const T& callable) : wrapper(), callable(callable) {}
 
-        wrapper_function(const wrapper& other) {
-            wrapper_function(other.callable);
-        }
-
         wrapper_function(T&& callable) : wrapper(), callable(std::move(callable)) {}
 
-        ~wrapper_function() {}
+        ~wrapper_function() = default;
+
+        R call(Args&&... args) {
+            return callable(std::forward<Args>(args)...);
+        }
 
         void move_by_pointer(void* to) {
             new (to) wrapper_function<T>(std::move(callable));
@@ -148,10 +144,6 @@ private:
 
         virtual void clone_small(void* to) const {
             new (to) wrapper_function<T>(callable);
-        }
-
-        R call(Args&&... args) {
-            return callable(std::forward<Args>(args)...);
         }
 
         std::unique_ptr<wrapper> clone() const {
@@ -169,11 +161,11 @@ private:
 
         wrapper_member(member callable) : wrapper(), callable(std::move(callable)) {}
 
-        wrapper_member(const wrapper& other) {
-            wrapper_member(other.callable);
-        }
+        ~wrapper_member() = default;
 
-        ~wrapper_member() {}
+        R call(Class&& object, FunArgs&&... fun_args) {
+            return (object.*callable)(std::forward<FunArgs>(fun_args)...);
+        }
 
         void move_by_pointer(void* to) {
             new (to) wrapper_member<F, Class>(std::move(callable));
@@ -181,10 +173,6 @@ private:
 
         virtual void clone_small(void* to) const {
             new (to) wrapper_member<F, Class>(callable);
-        }
-
-        R call(Class&& object, FunArgs&&... fun_args) {
-            return (object.*callable)(std::forward<FunArgs>(fun_args)...);
         }
 
         std::unique_ptr<wrapper> clone() const {
@@ -195,7 +183,7 @@ private:
         member callable;
     };
 
-    static constexpr int MAX_SIZE = 64;
+    static constexpr int MAX_SIZE = 128;
     bool small_object;
 
     union {

@@ -3,6 +3,7 @@
 #include <iostream>
 #include <functional>
 #include <vector>
+#include <array>
 
 void rvalue(int&& a) {
     std::cout << a << '\n';
@@ -32,24 +33,7 @@ public:
 
 class Enormous {
 public:
-    int a = 10;
-    int b = 10;
-    int c = 10;
-    int d = 10;
-    int e = 10;
-    int f = 10;
-    int g = 10;
-    int h = 10;
-    int y = 10;
-    int a1 = 10;
-    int b1 = 10;
-    int c1 = 10;
-    int d1 = 10;
-    int e1 = 10;
-    int f1 = 10;
-    int g1 = 10;
-    int h1 = 10;
-    int y1 = 10;
+    std::array<int, 256> a;
     void operator()() {
         std::cout << "test big(" << sizeof(*this) << ")\n";
     }
@@ -64,8 +48,6 @@ void with_templates(const T& arg) {
     std::cout << "HEY\n";
     std::cout << arg;
 }
-
-
 
 
 void test_empty() {
